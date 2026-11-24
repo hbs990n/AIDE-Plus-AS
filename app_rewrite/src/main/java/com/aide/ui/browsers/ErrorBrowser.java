@@ -30,6 +30,9 @@ import com.aide.ui.util.FileSystem;
 import com.aide.ui.views.CustomKeysListView;
 import java.util.ArrayList;
 import java.util.List;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.PrintStream;
 import com.aide.ui.services.ErrorService;
 import io.github.zeroaicy.aide.preference.ZeroAicySetting;
 import android.widget.Toast;
@@ -116,6 +119,91 @@ public class ErrorBrowser extends LinearLayout implements a {
 		}
 		
 		Zo();
+    }
+
+	/**
+	 * 将 ErrorService 中的全部错误/警告写入项目根目录的 aide-build-errors.log。
+	 * 无错误时也写一行简要说明，便于确认日志是最新的。
+	 */
+	private void dumpErrorsToProjectRoot(ErrorService errorService, int errorCount) {
+		PrintStream out = null;
+		try {
+			String projectRoot = ServiceContainer.getProjectService().getCurrentAppHome();
+			if (projectRoot == null || projectRoot.length() == 0) {
+				return;
+			}
+			File logFile = new File(projectRoot, "aide-build-errors.log");
+			File parent = logFile.getParentFile();
+			if (parent != null && !parent.exists()) {
+				parent.mkdirs();
+			}
+			out = new PrintStream(new FileOutputStream(logFile, false));
+
+			out.println("==== AIDE-Plus 构建错误日志 ====");
+			out.println("生成时间: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
+			out.println("错误总数: " + errorCount);
+			out.println();
+
+			int total = 0;
+			for (String filePath : errorService.nw()) {
+				List<SyntaxError> errors = errorService.P8(filePath);
+				if (errors == null || errors.isEmpty()) {
+					continue;
+				}
+				out.println("### 文件: " + filePath);
+				for (SyntaxError syntaxError : errors) {
+					if (syntaxError == null) {
+						continue;
+					}
+					total++;
+					String describe = syntaxError.j6();
+					out.println("  [错误 " + total + "] 行 " + syntaxError.jw + ":" + syntaxError.fY
+							+ " - 行 " + syntaxError.qp + ":" + syntaxError.k2);
+					out.println("      " + (describe == null ? "" : describe));
+				}
+				out.println();
+			}
+
+			// 无错误时记录警告（有错误时原 UI 不显示警告，这里也保持一致）
+			if (errorCount == 0 && errorService.v5 != null) {
+				int warnCount = 0;
+				for (String filePath : errorService.nw()) {
+					SyntaxError[] warnings = errorService.v5.get(filePath);
+					if (warnings == null || warnings.length == 0) {
+						continue;
+					}
+					boolean headerWritten = false;
+					for (SyntaxError syntaxError : warnings) {
+						if (syntaxError == null || syntaxError.WB == 112 || !syntaxError.Zo()) {
+							continue;
+						}
+						if (!headerWritten) {
+							out.println("### 文件: " + filePath + " (警告)");
+							headerWritten = true;
+						}
+						warnCount++;
+						String describe = syntaxError.j6();
+						out.println("  [警告 " + warnCount + "] 行 " + syntaxError.jw + ":" + syntaxError.fY
+								+ " - 行 " + syntaxError.qp + ":" + syntaxError.k2);
+						out.println("      " + (describe == null ? "" : describe));
+					}
+					if (headerWritten) {
+						out.println();
+					}
+				}
+				if (warnCount == 0) {
+					out.println("无错误，无警告。");
+				}
+			}
+			out.println("==== 结束 ====");
+			AppLog.i("ErrorBrowser", "dumped " + total + " errors to " + logFile.getAbsolutePath());
+		} catch (Throwable t) {
+			AppLog.e("ErrorBrowser", "dump errors failed: " + t.getMessage());
+		} finally {
+			if (out != null) {
+				out.close();
+			}
+		}
     }
 
 	// 
@@ -207,6 +295,9 @@ public class ErrorBrowser extends LinearLayout implements a {
 		// this.warningCount = warningCount;
 
 		this.adapter.DW(entryList);
+
+		// 把当前错误落盘到项目根目录，方便复制给 AI 分析。
+		dumpErrorsToProjectRoot(errorService, errorCount);
 
 		if (hasFocus) {
 			AppLog.d("Focus error browser after refresh");
