@@ -298,17 +298,21 @@ afterEvaluate {
                 val buildDir = project.layout.buildDirectory.asFile.get().path
                 val dexFolder = project.layout.projectDirectory.file("Dex")
 
-                val optimizeAp = Paths.get(
-                    buildDir,
-                    "intermediates",
-                    "optimized_processed_res",
-                    taskDefaultName!!,
-                    "optimize${taskDefaultName}Resources",
-                    "resources-${taskDefaultName!!.camelToKebab()}-optimize.ap_"
-                )
-
-                println("optimize.ap_ file in ${optimizeAp.toFile().absolutePath}")
-
+                // AGP 8.x 改了 optimized_processed_res 的输出布局，写死路径会 FileNotFoundException。
+                // 递归搜索真正的 optimize.ap_；找不到就只告警跳过注入，不阻断打包。
+                val buildDirPath = project.layout.buildDirectory.asFile.get().toPath()
+                val optimizeAp = run {
+                    val candidates = mutableListOf<java.nio.file.Path>()
+                    if (Files.exists(buildDirPath)) {
+                        Files.walk(buildDirPath).use { stream ->
+                            stream.filter {
+                                Files.isRegularFile(it) && it.fileName.toString().endsWith("-optimize.ap_")
+                            }.forEach { candidates.add(it) }
+                        }
+                    }
+                    println("optimize.ap_ candidates: ${candidates.map { it.toString() }}")
+                    candidates.firstOrNull()
+                }
 
                 // AGP 8.x 的 mergeDex 输出目录名随版本变化，写死路径会数到 0。
                 // 递归搜索整个 dex 中间目录，兼容不同 AGP 版本。
@@ -330,9 +334,11 @@ afterEvaluate {
                     println("WARNING: no app dex files found; continuing with default dex numbering")
                 }
 
-                var dexCount = maxOf(dexFound, 1) + 2
-
-                try {
+                if (optimizeAp == null) {
+                    println("WARNING: no optimize.ap_ found; skip injecting preset dex into resource package")
+                } else {
+                    var dexCount = maxOf(dexFound, 1) + 2
+                    println("optimize.ap_ file in ${optimizeAp.toFile().absolutePath}")
                     ZFile.openReadWrite(optimizeAp.toFile()).use { zip ->
                         dexFolder.asFile.listFiles()?.forEach {
                             /// 不允许先添加 AIDE+_2.3.dex
@@ -352,8 +358,6 @@ afterEvaluate {
                         val dexName = "classes${dexCount}.dex"
                         zip.add(dexName, inputStream)
                     }
-                } catch (e: Exception) {
-                    throw e
                 }
             }
         }
