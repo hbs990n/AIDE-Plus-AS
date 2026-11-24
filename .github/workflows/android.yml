@@ -1,59 +1,45 @@
-name: Build & Publish Release APK
+name: Build AIDE-Plus-AS APK
 
 on:
   push:
-    tags:
-      - v*
-  pull_request:
-    # 分支名称
-    branches: [ "master" ]
-  workflow_dispatch: { }
+    branches: [ master ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: set up JDK 21
-      uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-        cache: gradle
+      - uses: actions/checkout@v4
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-    - name: Build with Gradle
-      run: ./gradlew :app:assembleRelease
-    
-    # 获取版本
-    - name: Get versionName and versionCode from build.gradle.kts
-      id: get_version_info
-      run: |
-        VERSION_NAME=$(grep "version =" build.gradle.kts | awk '{print $3}' | tr -d "'")
-        echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
-        VERSION_CODE=$(grep "versionCode =" build.gradle.kts | awk '{print $3}')
-        echo "VERSION_CODE=${VERSION_CODE}" >> $GITHUB_ENV
-        RELEASE_NAME="v${VERSION_NAME}-${VERSION_CODE}"
-        echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_ENV
-        ASSET_NAME="AIDE-Plus_${VERSION_NAME}.apk"
-        echo "ASSET_NAME=${ASSET_NAME}" >> $GITHUB_ENV
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
 
-    # 重命名
-    - name: Rename APK
-      run: mv build/app/outputs/apk/release/app-release.apk build/app/outputs/apk/release/${{ env.ASSET_NAME }}
-    - name: Upload  APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ASSET_NAME }}
-        path: build/app/outputs/apk/release/${{ env.ASSET_NAME }}
-    # 发布到 Release
-    - name: Upload APK to GitHub Release
-      uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        tag_name: ${{ env.VERSION_NAME }}
-        repository: neu233/AIDE-Plus-AS
-        files: build/app/outputs/apk/release/${{ env.ASSET_NAME }}
-        token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 源码里写的是 -Xmx20480m，GitHub Runner 只有 ~7GB 内存，会直接 OOM。
+      - name: Cap Gradle heap for runner
+        run: sed -i 's/org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8/' gradle.properties
+
+      - name: Build default release APK
+        run: ./gradlew :app:assembleDefaultRelease --no-daemon --stacktrace
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find build/app/outputs/apk -name '*.apk' -type f | head -n 1)
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK"
+          ls -lh build/app/outputs/apk/*/release/ 2>/dev/null || true
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIDE-Plus-AS
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
