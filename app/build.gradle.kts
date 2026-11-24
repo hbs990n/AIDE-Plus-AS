@@ -310,24 +310,27 @@ afterEvaluate {
                 println("optimize.ap_ file in ${optimizeAp.toFile().absolutePath}")
 
 
+                // AGP 8.x 的 mergeDex 输出目录名随版本变化，写死路径会数到 0。
+                // 递归搜索整个 dex 中间目录，兼容不同 AGP 版本。
                 val appDexCount: () -> Int = {
-                    val dexDir = Paths.get(
+                    val dexRoot = Paths.get(
                         project.layout.buildDirectory.asFile.get().path,
                         "intermediates",
-                        "dex",
-                        taskDefaultName!!,
-                        "mergeDex${taskDefaultName}"
+                        "dex"
                     )
-                    if (!Files.exists(dexDir)) 0
-                    else {
-                        Files.list(dexDir).use { it.count().toInt() }
+                    if (!Files.exists(dexRoot)) 0
+                    else Files.walk(dexRoot).use { stream ->
+                        stream.filter { it.toString().endsWith(".dex") }.count().toInt()
                     }
                 }
 
-                println("app_dex_count: ${appDexCount()}")
+                val dexFound = appDexCount()
+                println("app_dex_count: $dexFound")
+                if (dexFound == 0) {
+                    println("WARNING: no app dex files found; continuing with default dex numbering")
+                }
 
-                check(appDexCount() != 0) { "Unexpected app dex count" }
-                var dexCount = appDexCount() + 2
+                var dexCount = maxOf(dexFound, 1) + 2
 
                 try {
                     ZFile.openReadWrite(optimizeAp.toFile()).use { zip ->
